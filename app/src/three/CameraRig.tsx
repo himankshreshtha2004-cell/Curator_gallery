@@ -16,7 +16,7 @@ function goalFor(mode: CamMode): { pos: THREE.Vector3; tgt: THREE.Vector3; speed
   const st = useGame.getState()
   switch (mode) {
     case 'title': return { pos: REF_POS.clone(), tgt: REF_TGT.clone(), speed: 1.2 }
-    case 'explore': return { pos: new THREE.Vector3(0.9, 2.75, 11.4), tgt: new THREE.Vector3(-1.05, 0.25, 6.1), speed: 1.6 }
+    case 'explore': return { pos: new THREE.Vector3(0.7, 3.7, 10.9), tgt: new THREE.Vector3(-1.25, 0.0, 6.5), speed: 1.6 }
     case 'focus': {
       const b = st.selected !== null ? st.progress.blades[st.selected] : null
       const p = b ? new THREE.Vector3(b.x, 0.55, b.z) : C.clone()
@@ -31,7 +31,7 @@ function goalFor(mode: CamMode): { pos: THREE.Vector3; tgt: THREE.Vector3; speed
 
 export function CameraRig() {
   const controls = useRef<any>(null)
-  const { camera } = useThree()
+  const { camera, invalidate } = useThree()
   const camMode = useGame((s) => s.camMode), nonce = useGame((s) => s.camNonce)
   const sens = useGame((s) => s.save.settings.cameraSensitivity)
   const goal = useRef<{ pos: THREE.Vector3; tgt: THREE.Vector3; speed: number } | null>(null)
@@ -55,6 +55,7 @@ export function CameraRig() {
     const st = useGame.getState()
     const g = goal.current
     if (g) {
+      invalidate()
       const k = 1 - Math.exp(-dt * g.speed * 1.6)
       camera.position.lerp(g.pos, k); c.target.lerp(g.tgt, k)
       if (camera.position.distanceTo(g.pos) < 0.01 && c.target.distanceTo(g.tgt) < 0.01) {
@@ -65,6 +66,7 @@ export function CameraRig() {
     if (st.camMode === 'title' && !st.save.settings.reducedMotion && !g) {
       // a barely perceptible settle: the camera breathes a few centimetres, never sweeps
       const t = performance.now() / 1000
+      invalidate()
       camera.position.set(REF_POS.x + Math.sin(t * 0.11) * 0.06, REF_POS.y + Math.sin(t * 0.07) * 0.02, REF_POS.z)
     }
     // locked (cinematic) modes: the orbit controller is disabled, so aim the camera ourselves

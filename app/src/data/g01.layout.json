@@ -157,8 +157,8 @@
       "arcFromDeg": 0
     },
     "tolerance": {
-      "position": 0.12,
-      "yawDeg": 8
+      "position": 0.16,
+      "yawDeg": 10
     },
     "dragBounds": {
       "x0": -3.75,
@@ -167,10 +167,10 @@
       "z1": 10.9
     },
     "startZone": {
-      "x0": 0.5,
-      "x1": 2.3,
-      "z0": 4.2,
-      "z1": 6.9
+      "x0": -0.3,
+      "x1": 1.5,
+      "z0": 6.6,
+      "z1": 8.8
     },
     "seed": 1101
   },

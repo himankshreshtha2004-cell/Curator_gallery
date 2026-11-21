@@ -66,20 +66,24 @@ function arcBand(angle: number, width: number, span: number) {
 }
 
 function EtchedCircle() {
-  const progress = useGame((s) => s.progress), hint = useGame((s) => s.hint), closeness = useGame((s) => s.closeness), dragging = useGame((s) => s.dragging)
+  const invalidate = useThree((s) => s.invalidate)
   const geos = useMemo(() => SLOTS.map((s) => arcBand(s.angle, CIRCLE.line, ARC_SPAN - 0.002)), [])
   const mats = useMemo(() => SLOTS.map(() => multiplyMaterial('#ffffff')), [])
   const ref = useRef(0)
   useFrame((_, dt) => {
     ref.current += dt
+    const { progress, hint, closeness, dragging } = useGame.getState()
+    let moving = hint >= 1
     SLOTS.forEach((s, k) => {
       const filled = progress.filled[k], active = s.composition === progress.composition && !filled
       let v = 0.74                                   // a fine etched groove in the concrete
       if (filled) v = 0.46                            // inlaid: the light has "written" this arc into the stone
       else if (active) v = 0.68 - (dragging ? closeness * 0.1 : 0) - (hint >= 1 ? 0.1 + 0.04 * Math.sin(ref.current * 2.2) : 0)
       const c = filled ? new THREE.Color(v * 1.04, v * 0.97, v * 0.9) : new THREE.Color(v, v * 0.985, v * 0.965)
+      if (Math.abs(mats[k].color.r - c.r) > 0.002) moving = true
       mats[k].color.lerp(c, Math.min(1, dt * 4))
     })
+    if (moving) invalidate()
   })
   return <group>{geos.map((g, k) => <mesh key={k} geometry={g} material={mats[k]} renderOrder={2} />)}</group>
 }
@@ -91,6 +95,7 @@ function DoorAndSpill() {
   const spot = useRef<THREE.SpotLight>(null!)
   const t = useRef(open ? 1 : 0)
   const x0 = useRef<number | null>(null)
+  const invalidate = useThree((s) => s.invalidate)
   useFrame((_, dt) => {
     if (!panel) return
     if (x0.current === null) x0.current = panel.position.x
@@ -98,6 +103,7 @@ function DoorAndSpill() {
     const e = t.current
     panel.position.x = x0.current + e * (layout.door.width + 0.05)
     if (spot.current) spot.current.intensity = e * 34 * EXPOSURE
+    if (Math.abs(e - (open ? 1 : 0)) > 0.002) invalidate()
   })
   const z = layout.room.z0
   return (
@@ -111,6 +117,8 @@ export function GalleryScene() {
   const gltf = useGLTF(BASE + 'gallery01.glb') as any
   const assets = useGalleryAssets()
   const camMode = useGame((s) => s.camMode)
+  const quality = useGame((s) => s.save.settings.quality)
+  const gl = useThree((s) => s.gl)
   const scene3 = useThree((s) => s.scene)
   useEffect(() => { (window as any).__curatorScene = scene3 }, [scene3])
   useMemo(() => {
@@ -127,11 +135,17 @@ export function GalleryScene() {
     const L = toSun(), d = new THREE.DirectionalLight(new THREE.Color(...(layout.sun.color as [number, number, number])), layout.sun.strength * EXPOSURE)
     const c = new THREE.Vector3((DRAG.x0 + DRAG.x1) / 2, 0, (DRAG.z0 + DRAG.z1) / 2)
     d.position.set(c.x + L[0] * 14, L[1] * 14, c.z + L[2] * 14); d.target.position.copy(c)
-    d.castShadow = true; d.shadow.mapSize.set(2048, 2048); d.shadow.bias = -0.0004; d.shadow.normalBias = 0.02; d.shadow.radius = 3
+    d.castShadow = true; d.shadow.mapSize.set(1024, 1024); d.shadow.bias = -0.0004; d.shadow.normalBias = 0.02; d.shadow.radius = 3
     const cam = d.shadow.camera as THREE.OrthographicCamera; cam.left = -5.5; cam.right = 5.5; cam.top = 5.5; cam.bottom = -5.5; cam.near = 4; cam.far = 26
     return d
   }, [])
 
+  // only the three movable sculptures cast realtime shadows: re-render the shadow map only when one moves
+  useEffect(() => { gl.shadowMap.autoUpdate = false; gl.shadowMap.needsUpdate = true }, [gl])
+  useEffect(() => {
+    const n = quality === 'high' ? 2048 : 1024
+    if (sun.shadow.mapSize.x !== n) { sun.shadow.mapSize.set(n, n); sun.shadow.map?.dispose(); (sun.shadow as any).map = null; gl.shadowMap.needsUpdate = true }
+  }, [quality, sun, gl])
   const catcher = useMemo(() => shadowCatcherMaterial(0.64), [])
   const sky = layout.skylights, top = layout.room.height + layout.room.slab + layout.shaft.depth
   return (

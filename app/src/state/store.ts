@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import {
   type GalleryProgress, type Xform, freshProgress, tryLock, applyLock, compositionDone, advance, resetComposition,
-  constrain, alignedCount, SLOTS, TOTAL,
+  constrain, alignedCount, SLOTS, TOTAL, guide,
 } from '../game/puzzle'
 import { type SaveData, type Settings, loadProgress, saveProgress, completeGallery, emptySave } from '../game/save'
 import { sfx } from '../audio/sound'
@@ -29,6 +29,10 @@ interface State {
   doorOpen: boolean
   closeness: number
   arrivedAt: number
+  briefing: boolean
+  lastProgressAt: number
+  closeBriefing(): void
+  openBriefing(): void
 
   go(s: Screen): void
   newJourney(): void
@@ -47,6 +51,7 @@ interface State {
   setPaused(v: boolean): void
   setSettings(p: Partial<Settings>): void
   debugSolveNext(): boolean
+  placeSelected(): void
 }
 
 const persist = (s: State, progress = s.progress, extra: Partial<SaveData> = {}) => {
@@ -74,10 +79,14 @@ export const useGame = create<State>()((set, get) => ({
   doorOpen: false,
   closeness: 0,
   arrivedAt: 0,
+  briefing: false,
+  lastProgressAt: 0,
+  closeBriefing: () => { const save = { ...get().save, briefingSeen: true }; saveProgress(save); set({ briefing: false, save, lastProgressAt: performance.now() }) },
+  openBriefing: () => set({ briefing: true, selected: null }),
 
   go: (screen) => set({ screen, paused: false, selected: null, camMode: screen === 'game' ? 'explore' : 'title', camNonce: get().camNonce + 1 }),
   newJourney: () => {
-    const save = { ...emptySave(), settings: get().save.settings }
+    const save = { ...emptySave(), settings: get().save.settings, briefingSeen: false }
     saveProgress(save)
     set({ save, progress: freshProgress(), tutorial: 0, undo: [], redo: [], hint: 0, doorOpen: false, banner: null })
     get().enterGallery(1)
@@ -87,7 +96,7 @@ export const useGame = create<State>()((set, get) => ({
     const progress = s.save.galleries[id] ?? freshProgress()
     set({
       screen: 'game', gallery: id, progress, selected: null, camMode: 'explore', camNonce: s.camNonce + 1, paused: false,
-      undo: [], redo: [], hint: 0, doorOpen: progress.complete, arrivedAt: performance.now(),
+      undo: [], redo: [], hint: 0, doorOpen: progress.complete, arrivedAt: performance.now(), lastProgressAt: performance.now(), briefing: !s.save.briefingSeen && !progress.complete,
       banner: { kind: 'arrival', title: `GALLERY ${String(id).padStart(2, '0')}`, sub: 'First Light', t: performance.now() },
     })
     sfx.ambience(s.save.settings)
@@ -137,7 +146,7 @@ export const useGame = create<State>()((set, get) => ({
     sfx.lock()
     if (tutorial < 4) tutorial = 4
     const save = persist(get(), progress, { tutorialDone: true })
-    set({ progress, save, undo: [], redo: [], selected: null, tutorial, lastLock: { slot: k, t: performance.now() }, closeness: 0, hint: 0 })
+    set({ progress, save, undo: [], redo: [], selected: null, tutorial, lastLock: { slot: k, t: performance.now() }, closeness: 0, hint: 0, lastProgressAt: performance.now() })
     if (compositionDone(progress)) {
       const c = progress.composition
       const done = c + 1 === 5
@@ -196,6 +205,15 @@ export const useGame = create<State>()((set, get) => ({
   setSettings: (p) => {
     const save = { ...get().save, settings: { ...get().save.settings, ...p } }
     saveProgress(save); set({ save }); sfx.apply(save.settings)
+  },
+  placeSelected: () => {   // hint stage 3: set the selected crescent onto its nearest free slot
+    const s = get(), i = s.selected
+    if (i === null) return
+    const g = guide(s.progress, i); if (!g) return
+    const b = s.progress.blades[i], from = { x: b.x, z: b.z, yaw: b.yaw }
+    const blades = s.progress.blades.map((o, j) => (j === i ? { ...o, ...SLOTS[g.slot].target } : o))
+    set({ progress: { ...s.progress, blades } })
+    get().commit(i, from)
   },
   debugSolveNext: () => {
     const s = get()

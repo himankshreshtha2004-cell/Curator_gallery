@@ -1,5 +1,6 @@
 import { Suspense, useEffect } from 'react'
-import { Canvas } from '@react-three/fiber'
+import { Canvas, useThree } from '@react-three/fiber'
+import { PerformanceMonitor } from '@react-three/drei'
 import { EffectComposer, N8AO, SMAA, ToneMapping, BrightnessContrast, HueSaturation } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import * as THREE from 'three'
@@ -15,13 +16,20 @@ function Post() {
   const q = useGame((s) => s.save.settings.quality)
   return (
     <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
-      {q !== 'low' ? <N8AO aoRadius={0.55} intensity={q === 'high' ? 1.6 : 1.1} distanceFalloff={0.6} quality={q === 'high' ? 'high' : 'medium'} halfRes={q !== 'high'} /> : <></>}
+      {q === 'high' ? <N8AO aoRadius={0.55} intensity={1.4} distanceFalloff={0.6} quality="medium" halfRes /> : <></>}
       <HueSaturation saturation={-0.05} />
       <BrightnessContrast contrast={0.04} />
       <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-      <SMAA />
+      {q !== 'low' ? <SMAA /> : <></>}
     </EffectComposer>
   )
+}
+
+/** frame-on-demand: any game-state change asks for a new frame; idle scenes cost nothing */
+function DemandBridge() {
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => useGame.subscribe(() => invalidate()), [invalidate])
+  return null
 }
 
 function Keys() {
@@ -77,12 +85,20 @@ export default function App() {
         className="stage"
         flat
         shadows={{ type: THREE.PCFSoftShadowMap }}
-        dpr={quality === 'low' ? 1 : [1, 2]}
-        gl={{ antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: true }}
+        frameloop="demand"
+        dpr={quality === 'high' ? [1, 1.5] : quality === 'balanced' ? [1, 1.25] : 0.8}
+        gl={{ antialias: false, powerPreference: 'high-performance', stencil: false }}
         camera={{ fov: layout.camera.fovDeg, near: 0.05, far: 120, position: layout.camera.position as [number, number, number] }}
         onPointerMissed={() => { const st = useGame.getState(); if (!st.dragging) st.select(null) }}
       >
         <color attach="background" args={['#e9e3d8']} />
+        <DemandBridge />
+        <PerformanceMonitor
+          onDecline={() => {   // the device is struggling: step quality down once per decline (saved)
+            const st = useGame.getState(), q = st.save.settings.quality
+            if (q !== 'low') st.setSettings({ quality: q === 'high' ? 'balanced' : 'low' })
+          }}
+        />
         <Suspense fallback={null}>
           <GalleryScene />
           <Post />

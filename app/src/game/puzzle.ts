@@ -183,3 +183,20 @@ export function resetComposition(g: GalleryProgress, seed = P.seed): GalleryProg
   const filled = g.filled.map((f, k) => (SLOTS[k].composition === g.composition ? false : f))
   return { ...g, filled, blades: scramble(g.composition, seed).map((b) => ({ ...b, slot: null })) }
 }
+
+/** guidance for a blade: its nearest free target in the active composition, how far and which way to turn */
+export function guide(g: GalleryProgress, i: number): { slot: number; dist: number; turn: number; close: number } | null {
+  const b = g.blades[i]
+  if (!b || b.slot !== null || g.complete) return null
+  let best: { slot: number; dist: number; turn: number; close: number } | null = null
+  for (let k = 0; k < SLOTS.length; k++) {
+    const s = SLOTS[k]
+    if (s.composition !== g.composition || g.filled[k]) continue
+    const c = closeness(b, s.target)
+    if (!best || c > best.close) {
+      let t = (s.target.yaw - b.yaw) % (2 * Math.PI); if (t > Math.PI) t -= 2 * Math.PI; if (t < -Math.PI) t += 2 * Math.PI
+      best = { slot: k, dist: Math.hypot(s.target.x - b.x, s.target.z - b.z), turn: t, close: c }
+    }
+  }
+  return best
+}

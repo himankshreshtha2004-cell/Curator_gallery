@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useProgress } from '@react-three/drei'
 import { useGame } from '../state/store'
 import { CATALOG, WINGS, pad2, byId } from '../data/catalog'
-import { TOTAL, COMPOSITIONS, PER, alignedCount } from '../game/puzzle'
+import { TOTAL, COMPOSITIONS, PER, alignedCount, guide, TOL_POS, TOL_YAW } from '../game/puzzle'
 import layout from '../data/g01.layout.json'
 
 // ---------------------------------------------------------------- icons (thin, minimal)
@@ -18,6 +18,7 @@ const I = {
   undo: <svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" /></svg>,
   redo: <svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3" /></svg>,
   hint: <svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z" /></svg>,
+  help: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.6M12 17h.01" /></svg>,
 }
 const Btn = ({ label, onClick, children, active, disabled }: any) => (
   <button className={'icon' + (active ? ' on' : '')} aria-label={label} title={label} onClick={onClick} disabled={disabled}>{children}</button>
@@ -142,24 +143,69 @@ function SettingsPanel({ onClose, inGame }: { onClose(): void; inGame: boolean }
 }
 
 const TUTORIAL = [
-  'Select one of the three stone crescents.',
-  'Drag it into the sunlight. Its shadow moves with it.',
-  'Turn it — drag the bronze ring, or press Q and E.',
-  'Lay the curved shadow onto the etched circle until it settles.',
+  'Click one of the three stone crescents to pick it up.',
+  'Drag it into the patch of sunlight on the left. Its shadow appears on the floor.',
+  'Turn it with the bronze ring, or Q and E, until its shadow curves like the circle.',
+  'Slide the curved shadow onto the etched circle. When it fits, it locks.',
 ]
+const HINT_TEXT = [
+  '',
+  'Hint 1 · The line on the floor leads the crescent to where it belongs.',
+  'Hint 2 · The pale outline shows exactly how it should stand.',
+  'Hint 3 · Select a crescent and press “Place it” to set it for you.',
+]
+
+function Briefing() {
+  const st = useGame()
+  if (!st.briefing) return null
+  return (
+    <div className="briefing fade-in" role="dialog" aria-label="How to play">
+      <div className="paper">
+        <div className="eyebrow">GALLERY 01 · FIRST LIGHT</div>
+        <h2>The light writes in shadow.</h2>
+        <ol className="steps">
+          <li><b>1</b><span>An empty circle is etched into the floor, inside a patch of sunlight.</span></li>
+          <li><b>2</b><span>Move and turn each stone crescent so its <em>curved shadow</em> lies exactly on the circle.</span></li>
+          <li><b>3</b><span>Every shadow that fits locks in place. Fill all five arcs, 15 shadows, and the way on opens.</span></li>
+        </ol>
+        <p className="keys">Drag to move · drag the bronze ring or press Q / E to turn · H for a hint · drag anywhere else to look around · scroll to zoom</p>
+        <button className="begin" onClick={() => st.closeBriefing()} autoFocus>Begin</button>
+      </div>
+    </div>
+  )
+}
+
+/** live guidance for the selected crescent: how far, which way to turn, and when it fits */
+function Guidance({ i }: { i: number }) {
+  const progress = useGame((s) => s.progress), dragging = useGame((s) => s.dragging)
+  const g = guide(progress, i)
+  if (!g) return null
+  const deg = Math.round((Math.abs(g.turn) * 180) / Math.PI)
+  const fits = g.dist <= TOL_POS && Math.abs(g.turn) <= TOL_YAW
+  if (fits) return <span className="guide fit">{dragging ? 'It fits — let go' : 'It fits'}</span>
+  const parts: string[] = []
+  if (g.dist > TOL_POS) parts.push(g.dist < 0.4 ? 'very close' : g.dist < 1.2 ? `${g.dist.toFixed(1)} m away` : 'far from its place')
+  if (Math.abs(g.turn) > TOL_YAW) parts.push(`turn ${g.turn > 0 ? 'left ↺ (Q)' : 'right ↻ (E)'} ${deg}°`)
+  return <span className="guide">{parts.join(' · ')}</span>
+}
 
 function Hud() {
   const st = useGame()
   const g = byId(st.gallery ?? 1)
   const count = alignedCount(st.progress)
   const sel = st.selected
+  const [now, setNow] = useState(performance.now())
+  useEffect(() => { const t = setInterval(() => setNow(performance.now()), 5000); return () => clearInterval(t) }, [])
+  const stuck = !st.briefing && !st.progress.complete && now - st.lastProgressAt > 40000
   return (
     <div className="hud">
       <div className="hud-tl">
         <div className="eyebrow">GALLERY {pad2(g.id)}</div>
         <div className="gname">{g.name}</div>
+        {!st.progress.complete && <div className="objective">Lay each crescent's shadow on the etched circle</div>}
       </div>
       <div className="hud-tr">
+        <Btn label="How to play" onClick={() => st.openBriefing()}>{I.help}</Btn>
         <Btn label="Pause" onClick={() => st.setPaused(true)}>{I.pause}</Btn>
         <Btn label={st.save.settings.sound ? 'Mute sound' : 'Unmute sound'} onClick={() => st.setSettings({ sound: !st.save.settings.sound })}>{st.save.settings.sound ? I.sound : I.mute}</Btn>
         <Btn label="Settings" onClick={() => st.setPaused(true)}>{I.settings}</Btn>
@@ -178,22 +224,28 @@ function Hud() {
         {sel !== null && !st.progress.complete ? (
           <div className="ctx fade-in">
             <Btn label="Turn left (Q)" onClick={() => st.nudge(sel, 0, 0, (5 * Math.PI) / 180)}>{I.rotL}</Btn>
-            <span className="ctx-label">Sculpture {sel + 1}<small>drag to move · ring to turn</small></span>
+            <span className="ctx-label">Crescent {sel + 1}<small><Guidance i={sel} /></small></span>
             <Btn label="Turn right (E)" onClick={() => st.nudge(sel, 0, 0, (-5 * Math.PI) / 180)}>{I.rotR}</Btn>
             <span className="sep" />
+            {st.hint >= 3 && <button className="txt on" onClick={() => st.placeSelected()}>Place it</button>}
             <Btn label="Focus (F)" onClick={() => st.setCam('focus')}>{I.focus}</Btn>
             <Btn label="Deselect (Esc)" onClick={() => st.select(null)}>{I.close}</Btn>
           </div>
-        ) : st.tutorial < 4 && !st.progress.complete ? (
-          <p className="caption fade-in" key={st.tutorial}>{TUTORIAL[st.tutorial]}</p>
         ) : null}
+        {!st.progress.complete && !st.briefing && (st.hint ? (
+          <p className="caption fade-in" key={'h' + st.hint}>{HINT_TEXT[st.hint]}</p>
+        ) : st.tutorial < 4 && sel === null ? (
+          <p className="caption fade-in" key={st.tutorial}>{TUTORIAL[st.tutorial]}</p>
+        ) : stuck && sel === null ? (
+          <p className="caption fade-in">Stuck? Tap Hint, or press H. It shows where each shadow belongs.</p>
+        ) : null)}
         {st.dragging && st.closeness > 0.55 && <div className="meter"><i style={{ width: `${Math.round(st.closeness * 100)}%` }} /></div>}
       </div>
       <div className="hud-br">
         <Btn label="Undo (Ctrl+Z)" onClick={() => st.doUndo()} disabled={!st.undo.length}>{I.undo}</Btn>
         <Btn label="Redo (Ctrl+Y)" onClick={() => st.doRedo()} disabled={!st.redo.length}>{I.redo}</Btn>
         <span className="sep" />
-        <button className={'txt' + (st.hint ? ' on' : '')} onClick={() => st.setHint(((st.hint + 1) % 4) as any)} aria-label="Hint (H)">
+        <button className={'txt' + (st.hint ? ' on' : '') + (stuck && !st.hint ? ' pulse' : '')} onClick={() => st.setHint(((st.hint + 1) % 4) as any)} aria-label="Hint (H)">
           {I.hint}<span>{st.hint ? `Hint ${st.hint}/3` : 'Hint'}</span>
         </button>
         <span className="sep" />
@@ -248,6 +300,7 @@ export function Overlay() {
       {st.screen === 'title' && !settings && <Title onSettings={() => setSettings(true)} />}
       {st.screen === 'atlas' && <Atlas />}
       {st.screen === 'game' && <Hud />}
+      {st.screen === 'game' && <Briefing />}
       {st.screen === 'game' && <Banner />}
       {st.screen === 'game' && <NextGallery />}
       {(settings || (st.screen === 'game' && st.paused)) && <SettingsPanel inGame={st.screen === 'game'} onClose={() => { setSettings(false); st.setPaused(false) }} />}

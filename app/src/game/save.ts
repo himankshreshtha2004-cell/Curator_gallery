@@ -17,11 +17,12 @@ export interface SaveData {
   galleries: Record<number, GalleryProgress>
   settings: Settings
   tutorialDone: boolean
+  briefingSeen?: boolean
 }
 export const KEY = 'the-curator.save.v1'
 
 export const defaultSettings = (): Settings => ({
-  sound: true, music: false, volume: 0.7, quality: 'high', reducedMotion: false, cameraSensitivity: 1, highContrastUI: false,
+  sound: true, music: false, volume: 0.7, quality: 'balanced', reducedMotion: false, cameraSensitivity: 1, highContrastUI: false,
 })
 export const emptySave = (): SaveData => ({ version: 1, unlocked: [1], completed: [], galleries: {}, settings: defaultSettings(), tutorialDone: false })
 
